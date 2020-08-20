@@ -1,0 +1,151 @@
+# Singularity definition file for building calibrate images
+bootstrap: library
+From: debian:10
+
+%files
+/home/torrance/Downloads/mwa-reduce /root/mwa-reduce
+
+%environment
+export JULIA_DEPOT_PATH=/opt/.julia
+
+%post
+# Set environment variables for build time
+export JULIA_DEPOT_PATH=/opt/.julia
+
+# Use Australia mirror
+sed  -i 's/ftp.us/ftp.au/g' /etc/apt/sources.list
+
+# Install system dependencies
+apt update && apt upgrade -y
+apt install -y \
+    casacore-dev \
+    libboost-all-dev \
+    wget \
+    git \
+    libhdf5-dev \
+    libgsl-dev \
+    libfftw3-dev \
+    libcfitsio-dev \
+    build-essential \
+    cmake \
+    libblas-dev \
+    liblapack-dev \
+    libxml2-dev
+
+# Update casacore data
+cd /usr/share/casacore/data && rm -r *
+wget ftp://ftp.astron.nl/outgoing/Measures/WSRT_Measures.ztar
+tar -xzf WSRT_Measures.ztar
+rm WSRT_Measures.ztar
+
+# Install CUDA toolkit
+wget http://developer.download.nvidia.com/compute/cuda/10.2/Prod/local_installers/cuda_10.2.89_440.33.01_linux.run
+sh cuda_10.2.89_440.33.01_linux.run --silent --toolkit --toolkitpath=/usr/local
+rm cuda_10.2.89_440.33.01_linux.run
+ln -s /usr/local/targets/x86_64-linux/lib/stubs/libcuda.so /usr/local/targets/x86_64-linux/lib/stubs/libcuda.so.1
+
+# Install IDG
+cd /root
+git clone --branch 0.7 https://gitlab.com/astron-idg/idg.git
+cd idg
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_LIB_CUDA=yes -DPERFORMANCE_REPORT=yes ..
+make -j 10 install
+ldconfig
+
+# Install wsclean
+cd /root
+git clone --branch v2.10.1 https://gitlab.com/aroffringa/wsclean.git
+cd wsclean
+mkdir build
+cd build
+cmake ..
+make -j 10 install
+ldconfig
+
+# chgcentre
+cd /root/wsclean/chgcentre
+mkdir build
+cd build
+cmake ..
+make install
+ldconfig
+
+# Install mwa-reduce
+cd /root/mwa-reduce
+mkdir -p build
+cd build
+rm -r **
+cmake ..
+make calibrate
+make flagantennae
+make peel
+make applysolutions
+make subtrmodel
+make flagbaselines
+for file in $(find . -maxdepth 1  -type f -executable); do cp $file /usr/local/bin; done
+
+# Install Julia
+cd /opt
+wget https://julialang-s3.julialang.org/bin/linux/x64/1.5/julia-1.5.0-linux-x86_64.tar.gz
+tar -xzf julia-1.5.0-linux-x86_64.tar.gz --strip 1 -C /usr/local
+
+# Install MWAjl
+mkdir /opt/.julia
+rm -r /opt/MWAjl || true
+git clone https://github.com/torrance/MWAjl.git /opt/MWAjl
+cd /opt/MWAjl
+julia -E 'using Pkg; Pkg.add(path=".");'
+
+# Hacky force downloads of CUDA drivers
+ARTIFACTS=$(echo /opt/.julia/packages/CuArrays/*/Artifacts.toml)
+julia -E 'using Pkg.Artifacts; ensure_artifact_installed("CUDA10.2", "'${ARTIFACTS}'"); ensure_artifact_installed("CUDNN+CUDA10.2", "'${ARTIFACTS}'"); ensure_artifact_installed("CUTENSOR+CUDA10.2", "'${ARTIFACTS}'");'
+
+# Force compilation
+cd /opt/MWAjl
+julia --project=. --color=yes --threads=$(nproc --all) test/integration.jl || true
+
+# Set permissions for non-privileged users
+chmod -R a+w /opt
+chmod a+rx /opt/.julia/artifacts/*
+
+# MWA beam in /root
+ln -s /opt/.julia/artifacts/b89f6fc9b19d44aee1527698bd23c12485d1d24a/mwa_full_embedded_element_pattern.h5 /
+
+# %apprun mksysimage
+# cd /opt/MWAjl/scripts
+# mkdir ../libs || true
+# julia --project=.. makesysimage.jl
+
+%apprun test
+cd /opt/MWAjl/test
+julia --project=.. stefcal.jl
+julia --project=.. skymodel.jl
+julia --project=.. predict.jl
+julia --project=.. integration.jl
+
+%apprun calibrate
+CORES=$(nproc --all)
+julia --threads=$CORES --color=yes --project=/opt/MWAjl /opt/MWAjl/bin/calibrate.jl "$@"
+
+%apprun wsclean
+/usr/local/bin/wsclean "$@"
+
+%apprun chgcentre
+/usr/local/bin/chgcentre "$@"
+
+%apprun applysolutions
+/usr/local/bin/applysolutions "$@"
+
+%apprun flagantennae
+/usr/local/bin/flagantennae "$@"
+
+%apprun flagbaselines
+/usr/local/bin/flagbaselines "$@"
+
+%apprun peel
+/usr/local/bin/peel "$@"
+
+%apprun subtrmodel
+/usr/local/bin/subtrmodel "$@"

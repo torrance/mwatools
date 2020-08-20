@@ -1,0 +1,7 @@
+alias wsclean="singularity run --no-home --nv --writable-tmpfs --app wsclean $MWATOOLS"
+alias chgcentre="singularity run --no-home --writable-tmpfs --app chgcentre $MWATOOLS"
+alias flagbaselines="singularity run --no-home --writable-tmpfs --app flagbaselines $MWATOOLS"
+alias flagantennae="singularity run --no-home --writable-tmpfs --app flagantennae $MWATOOLS"
+alias calibrate="singularity run --no-home --nv --writable-tmpfs --app calibrate $MWATOOLS"
+alias applysolutions="singularity run --no-home --writable-tmpfs --app applysolutions $MWATOOLS"
+
