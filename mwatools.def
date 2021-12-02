@@ -30,7 +30,8 @@ apt install -y \
     cmake \
     libblas-dev \
     liblapack-dev \
-    libxml2-dev
+    libxml2-dev \
+    libpmi2-0-dev
 
 # Update casacore data
 cd /usr/share/casacore/data && rm -r *
@@ -44,9 +45,19 @@ sh cuda_10.2.89_440.33.01_linux.run --silent --toolkit --toolkitpath=/usr/local
 rm cuda_10.2.89_440.33.01_linux.run
 ln -s /usr/local/targets/x86_64-linux/lib/stubs/libcuda.so /usr/local/targets/x86_64-linux/lib/stubs/libcuda.so.1
 
+# Install EveryBeam
+cd /root
+git clone https://git.astron.nl/RD/EveryBeam.git
+cd EveryBeam
+mkdir build
+cd build
+cmake ..
+make
+make install
+
 # Install IDG
 cd /root
-git clone --branch 0.7 https://gitlab.com/astron-idg/idg.git
+git clone --branch 0.8 https://gitlab.com/astron-idg/idg.git
 cd idg
 mkdir build
 cd build
@@ -54,22 +65,34 @@ cmake -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_LIB_CUDA=yes -DPERFORMANCE_REPOR
 make -j 10 install
 ldconfig
 
-# Install wsclean
+# Install openmpi
 cd /root
-git clone --branch v2.10.1 https://gitlab.com/aroffringa/wsclean.git
+wget https://download.open-mpi.org/release/open-mpi/v4.0/openmpi-4.0.4.tar.gz
+tar -xzf openmpi-4.0.4.tar.gz
+cd openmpi-4.0.4
+./configure --with-slurm --with-pmi
+make -j 10 install
+ldconfig
+
+# Install wsclean, wsclean-mp, chgcentre
+cd /root
+git clone --branch master https://gitlab.com/torrance/wsclean.git
+# git clone --branch master https://gitlab.com/aroffringa/wsclean
 cd wsclean
 mkdir build
 cd build
 cmake ..
 make -j 10 install
+cp wsclean-mp /usr/local/bin/
 ldconfig
 
-# chgcentre
+ls /usr/local/bin
+
 cd /root/wsclean/chgcentre
 mkdir build
 cd build
 cmake ..
-make install
+make -j 10 install
 ldconfig
 
 # Install mwa-reduce
@@ -131,6 +154,9 @@ julia --threads=$CORES --color=yes --project=/opt/MWAjl /opt/MWAjl/bin/calibrate
 
 %apprun wsclean
 /usr/local/bin/wsclean "$@"
+
+%apprun wscleanmp
+/usr/local/bin/wsclean-mp "$@"
 
 %apprun chgcentre
 /usr/local/bin/chgcentre "$@"
